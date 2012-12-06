@@ -1,7 +1,8 @@
 支持SOCKS 5协议的高速加密通信的代理服务器脚本
 
-代码地址
+代码地址：
 
+    https://github.com/jiangmiao/proxy
 
 解决现有代理的问题：
 
@@ -34,19 +35,29 @@
 
 本地测试：
 
-   $ erlc proxy.erl && erl -noshell -s proxy start
-   或
-   $ ./proxy.sh start
-   back listen at 0.0.0.0:8781.
-   front listen at 127.0.0.1:8780.
-   back address is 127.0.0.1:8781.
-  
-   $ curl -I --socks5 127.0.0.1:8780 www.baidu.com
-   HTTP/1.1 200 OK
-   Date: Wed, 05 Dec 2012 16:43:08 GMT
-   Server: BWS/1.0
-   Content-Length: 9777
-   ...
+    # 获取代码
+    $ git clone https://github.com/jiangmiao/proxy
+    正克隆到 'proxy'...
+    remote: Counting objects: 15, done.
+    remote: Compressing objects: 100% (11/11), done.
+    remote: Total 15 (delta 2), reused 15 (delta 2)
+    Unpacking objects: 100% (15/15), done.
+
+    $ cd proxy
+
+    $ erlc proxy.erl && erl -noshell -s proxy start
+    或
+    $ ./proxy.sh start
+    back listen at 0.0.0.0:8781.
+    front listen at 127.0.0.1:8780.
+    back address is 127.0.0.1:8781.
+
+    $ curl -I --socks5 127.0.0.1:8780 www.baidu.com
+    HTTP/1.1 200 OK
+    Date: Wed, 05 Dec 2012 16:43:08 GMT
+    Server: BWS/1.0
+    Content-Length: 9777
+    ...
 
 工作原理：
 
