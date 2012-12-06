@@ -1,38 +1,32 @@
-%% 简单高速加密的 socks5 代理服务器
-%%
-%% Client - 客户端：如浏览器
-%% Front  - 代理前端：从浏览器等客户端接收数据，简单加密后转发给后端
-%% Back   - 代理后端：从前端接收数据，解密后等同于Socks5服务器
-%% Remote - 远程服务器：需要请求的目标服务器
-%%
-%% Client 与 Front  为本地通信
-%% Back   与 Remote 为本地通信
-%% Front  与 Back   为异地加密通信
-%%
-%% 加密算法为 字节 异或 0x66 (01100110)
-
+%%% 支持Socks5协议的高速加密通信的代理服务器脚本
 -module(proxy).
 -export([
     start/0
 ]).
 
 -export([
-    back_start/0,
+    back_start/0, back_start/1,
     back_accept/1,
     back_process/1,
 
-    front_start/0,
-    front_accept/1,
-    front_process/1,
-    forward/4,
+    front_start/1,
+    front_accept/3,
+    front_process/3,
+    forward/3,
+
     flip/1,
     flip_recv/2, flip_recv/3,
-    flip_send/2
+    flip_send/2,
+
+    heart/0
 ]).
 
--define(FRONT_PORT, 5050).
--define(BACK_PORT, 5051).
+-define(FRONT_PORT, '8780').
+-define(BACK_PORT, '8781').
 -define(CONNECT_TIMEOUT, 5000).
+
+-define(PASSWORD, "abcd1234").
+-define(PASSWORD_LENGTH, length(?PASSWORD)).
 
 %% socks constants
 -define(IPV4, 1).
@@ -63,39 +57,40 @@ flip_recv(Client, Length, Timeout) ->
 flip_send(Client, Data) ->
     gen_tcp:send(Client, flip(Data)).
 
-forward(flip_recv, Client, Remote, From) ->
-    try
-        {ok, Packet} = flip_recv(Client, 0),
-        ok = gen_tcp:send(Remote, Packet)
-    catch
-        Error:Reason ->
-            io:format("Client: ~p ~p ~p.~n", [Client, Error, Reason]),
-            From ! {close},
-            exit({Error, Reason})
-    end,
-    forward(flip_recv, Client, Remote, From);
-
-forward(flip_send, Client, Remote, From) ->
+forward(Client, Remote, From) ->
     try
         {ok, Packet} = gen_tcp:recv(Client, 0),
         ok = flip_send(Remote, Packet)
     catch
         Error:Reason ->
-            io:format("Client: ~p ~p ~p.~n", [Client, Error, Reason]),
             From ! {close},
             exit({Error, Reason})
     end,
-    forward(flip_send, Client, Remote, From).
+    forward(Client, Remote, From).
 
-%% back，接受front的连接与认证，并接收加密的包解密后当作普通包处理。
-%% back -- remote，Raw
-%% remote -- back，Raw
-%% back -- front，Flip
+heart() ->
+    timer:sleep(10000),
+    io:format(".~n"),
+    heart().
+
 back_start() ->
-    {ok, Socket} = gen_tcp:listen(?BACK_PORT, [{reuseaddr, true},
-                                               {active, false},
-                                               binary]),
+    back_start(['0.0.0.0', ?BACK_PORT]).
+
+back_start([Port]) ->
+    back_start(['0.0.0.0', Port]);
+back_start(Args) ->
+    % prevent disconnect when run in ssh
+    spawn(?MODULE, heart, []),
+    [BackAddressStr, BackPortStr] = atoms_to_lists(Args, []),
+    BackPort = list_to_integer(BackPortStr),
+    {ok, BackAddress} = inet:getaddr(BackAddressStr, inet),
+    io:format("back listen at ~s:~p.~n", [BackAddressStr, BackPort]),
+    {ok, Socket} = gen_tcp:listen(BackPort, [{reuseaddr, true},
+                                             {active, false},
+                                             {ifaddr, BackAddress},
+                                             binary]),
     back_accept(Socket).
+
 
 back_accept(Socket) ->
     {ok, Client} = gen_tcp:accept(Socket),
@@ -106,12 +101,11 @@ back_process(Front) ->
     try
         From = self(),
 
-        {ok, <<"abcd1234">>} = flip_recv(Front, 8),
-        flip_send(Front, <<"ok">>),
+        {ok, <<?PASSWORD>>} = flip_recv(Front, ?PASSWORD_LENGTH, ?CONNECT_TIMEOUT),
 
         {ok, Remote} = socks5_handshake(Front),
-        spawn(?MODULE, forward, [flip_recv, Front, Remote, From]),
-        spawn(?MODULE, forward, [flip_send, Remote, Front, From]),
+        spawn(?MODULE, forward, [Front, Remote, From]),
+        spawn(?MODULE, forward, [Remote, Front, From]),
 
         receive
             {close} ->
@@ -119,38 +113,54 @@ back_process(Front) ->
                 gen_tcp:close(Remote)
         end
     catch
-        _:_ ->
+        Error:Reason ->
+            io:format("~p ~p ~p ~p.~n", [Front, Error, Reason, erlang:get_stacktrace()]),
             gen_tcp:close(Front)
     end.
 
+atoms_to_lists(L, R) ->
+    lists:reverse(atoms_to_lists2(L, R)).
 
-%% front，与back连接采用自定义协议，与客户端连接采用socks5
-%% client -- front，socks5 接收
-%% front -- back，Flip
-%% back -- front，Flip
-%% front -- client，Raw
-front_start() ->
-    {ok, Socket} = gen_tcp:listen(?FRONT_PORT, [{reuseaddr, true},
-                                                {active, false},
-                                                binary]),
-    front_accept(Socket).
+atoms_to_lists2([X|L], R) ->
+    atoms_to_lists2(L, [atom_to_list(X)|R]);
+atoms_to_lists2([], R) ->
+    R.
 
-front_accept(Socket) ->
+front_start([BackAddress]) ->
+    front_start([BackAddress, '8781']);
+front_start([BackAddress, BackPort]) ->
+    front_start([BackAddress, BackPort, '127.0.0.1', '8780']);
+front_start(Args) ->
+    [BackAddressStr, BackPortStr, FrontAddressStr, FrontPortStr] = atoms_to_lists(Args, []),
+    FrontPort = list_to_integer(FrontPortStr),
+    BackPort  = list_to_integer(BackPortStr),
+    {ok, FrontAddress} = inet:getaddr(FrontAddressStr, inet),
+    {ok, BackAddress}  = inet:getaddr(BackAddressStr, inet),
+    io:format("front listen at ~s:~p.~n", [FrontAddressStr, FrontPort]),
+    io:format("back address is ~s:~p.~n", [BackAddressStr, BackPort]),
+    {ok, Socket} = gen_tcp:listen(FrontPort, [{reuseaddr, true},
+                                              {active, false},
+                                              {ifaddr, FrontAddress},
+                                              binary]),
+    front_accept(Socket, BackAddress, BackPort).
+
+front_accept(Socket, BackAddress, BackPort) ->
     {ok, Client} = gen_tcp:accept(Socket),
-    spawn(?MODULE, front_process, [Client]),
-    front_accept(Socket).
+    spawn(?MODULE, front_process, [Client, BackAddress, BackPort]),
+    front_accept(Socket, BackAddress, BackPort).
 
-front_process(Client) ->
+front_process(Client, BackAddress, BackPort) ->
     try
         From = self(),
 
-        {ok, Back} = gen_tcp:connect("127.0.0.1", ?BACK_PORT, [{active, false},
-                                                                 binary]),
-        flip_send(Back, <<"abcd1234">>),
-        {ok, <<"ok">>} = flip_recv(Back, 2),
+        {ok, Back} = gen_tcp:connect(BackAddress,
+                                     BackPort,
+                                     [{active, false}, binary],
+                                     ?CONNECT_TIMEOUT),
+        ok = flip_send(Back, <<?PASSWORD>>),
 
-        spawn(?MODULE, forward, [flip_send, Client, Back, From]),
-        spawn(?MODULE, forward, [flip_recv, Back, Client, From]),
+        spawn(?MODULE, forward, [Client, Back, From]),
+        spawn(?MODULE, forward, [Back, Client, From]),
 
         receive
             {close} ->
@@ -158,17 +168,9 @@ front_process(Client) ->
                 gen_tcp:close(Back)
         end
     catch
-        _:_ ->
+        Error:Reason ->
+            io:format("~p ~p ~p ~p.~n", [Client, Error, Reason, erlang:get_stacktrace()]),
             gen_tcp:close(Client)
-    end.
-
-
-start() ->
-    spawn(?MODULE, back_start, []),
-    spawn(?MODULE, front_start, []),
-    receive
-        {close} ->
-            exit({done})
     end.
 
 socks5_handshake(Client) ->
@@ -190,6 +192,17 @@ socks5_handshake(Client) ->
             {ok, Address} = inet:getaddr(Domain, inet),
             {ok, <<Port:16>>} = flip_recv(Client, 2)
     end,
-    {ok, Remote} = gen_tcp:connect(Address, Port, [{active, false}, binary], ?CONNECT_TIMEOUT),
+    {ok, Remote} = gen_tcp:connect(Address,
+                                   Port,
+                                   [{active, false}, binary],
+                                   ?CONNECT_TIMEOUT),
     ok = flip_send(Client, <<5, 0, 0, 1, 0:32, 0:16 >>),
     {ok, Remote}.
+
+start() ->
+    spawn(?MODULE, back_start, [['0.0.0.0', '8781']]),
+    spawn(?MODULE, front_start, [['127.0.0.1', '8781', '127.0.0.1', '8780']]),
+    receive
+        {close} ->
+            exit({done})
+    end.
