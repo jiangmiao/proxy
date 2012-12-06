@@ -69,7 +69,7 @@
     Remote - 远程服务器：需要请求的目标服务器
 
     Client 与 Front  为本地通信
-    Back   与 Remote 为本地通信
+    Back   与 Remote 为异地原文转发
     Front  与 Back   为异地加密通信
 
 加密算法：
@@ -91,6 +91,6 @@ Front 与 Back 的认证协议：
 
     对socks5的协议支持并不完善，比如不支持BIND，IPV6。但在大多数情况下，比如浏览器，tsocks是没有问题的。
 
-LICENCE:
+LICENCE：
 
     MIT
