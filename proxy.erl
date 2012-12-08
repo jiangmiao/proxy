@@ -103,7 +103,8 @@ back_process(Front) ->
 
         {ok, <<?PASSWORD>>} = flip_recv(Front, ?PASSWORD_LENGTH, ?CONNECT_TIMEOUT),
 
-        {ok, Remote} = socks5_handshake(Front),
+        {ok, Remote} = back_socks5_handshake(Front),
+
         spawn(?MODULE, forward, [Front, Remote, From]),
         spawn(?MODULE, forward, [Remote, Front, From]),
 
@@ -158,6 +159,8 @@ front_process(Client, BackAddress, BackPort) ->
                                      [{active, false}, binary],
                                      ?CONNECT_TIMEOUT),
         ok = flip_send(Back, <<?PASSWORD>>),
+        {ok, Endpoint} = front_socks5_handshake(Client),
+        flip_send(Back, Endpoint),
 
         spawn(?MODULE, forward, [Client, Back, From]),
         spawn(?MODULE, forward, [Back, Client, From]),
@@ -173,12 +176,8 @@ front_process(Client, BackAddress, BackPort) ->
             gen_tcp:close(Client)
     end.
 
-socks5_handshake(Client) ->
-    {ok, <<?VERSION:8, Nmethods:8>>} = flip_recv(Client, 2),
-    {ok, _Methods} = flip_recv(Client, Nmethods),
-    ok = flip_send(Client, <<5, 0>>),
-
-    {ok, <<?VERSION:8, ?CONNECT:8, _Rsv:8, AType:8>>} = flip_recv(Client, 4),
+back_socks5_handshake(Client) ->
+    {ok, <<AType:8>>} = flip_recv(Client, 1),
     case AType of
         ?IPV4 ->
             {ok, <<AddressBin:32, Port:16>>} = flip_recv(Client, 6),
@@ -196,8 +195,28 @@ socks5_handshake(Client) ->
                                    Port,
                                    [{active, false}, binary],
                                    ?CONNECT_TIMEOUT),
-    ok = flip_send(Client, <<5, 0, 0, 1, 0:32, 0:16 >>),
     {ok, Remote}.
+
+%% 前端完成 socks5 协议的握手，始终立刻返回“成功”。避免二次请求节约时间。
+front_socks5_handshake(Client) ->
+    {ok, <<?VERSION:8, Nmethods:8>>} = gen_tcp:recv(Client, 2),
+    {ok, _Methods} = gen_tcp:recv(Client, Nmethods),
+    ok = gen_tcp:send(Client, <<5, 0>>),
+
+    {ok, <<?VERSION:8, ?CONNECT:8, _Rsv:8, AType:8>>} = gen_tcp:recv(Client, 4),
+    case AType of
+        ?IPV4 ->
+            {ok, Address} = gen_tcp:recv(Client, 4),
+            {ok, Port} = gen_tcp:recv(Client, 2),
+            Endpoint = <<AType:8, Address/binary, Port/binary>>;
+        ?DOMAIN ->
+            {ok, <<DomainLen:8>>} = gen_tcp:recv(Client, 1),
+            {ok, DomainBin} = gen_tcp:recv(Client, DomainLen),
+            {ok, Port} = gen_tcp:recv(Client, 2),
+            Endpoint = <<AType:8, DomainLen:8, DomainBin/binary, Port/binary>>
+    end,
+    ok = gen_tcp:send(Client, <<5, 0, 0, 1, 0:32, 0:16 >>),
+    {ok, Endpoint}.
 
 start() ->
     spawn(?MODULE, back_start, [['0.0.0.0', '8781']]),
