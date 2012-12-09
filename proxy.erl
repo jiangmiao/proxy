@@ -1,32 +1,38 @@
 %%% 支持Socks5协议的高速加密通信的代理服务器脚本
 -module(proxy).
 -export([
-    start/0
+    start/0,
+    back_start/0, back_start/1,
+    front_start/1
 ]).
 
 -export([
-    back_start/0, back_start/1,
-    back_accept/1,
     back_process/1,
-
-    front_start/1,
-    front_accept/3,
     front_process/3,
     forward/3,
 
-    flip/1,
-    flip_recv/2, flip_recv/3,
-    flip_send/2,
-
     heart/0
+]).
+
+-export([
+    back_pool_fill_loop/2,
+    back_pool_process/1,
+    back_pool_waiting/2
 ]).
 
 -define(FRONT_PORT, '8780').
 -define(BACK_PORT, '8781').
 -define(CONNECT_TIMEOUT, 5000).
+-define(POOL_SIZE, 10).
 
 -define(PASSWORD, "abcd1234").
 -define(PASSWORD_LENGTH, length(?PASSWORD)).
+
+-ifdef(debug).
+-define(LOG(Format, Values), io:format(Format, Values)).
+-else.
+-define(LOG(Format, Values), true).
+-endif.
 
 %% socks constants
 -define(IPV4, 1).
@@ -127,6 +133,104 @@ atoms_to_lists2([X|L], R) ->
 atoms_to_lists2([], R) ->
     R.
 
+back_pool_new(BackAddress, BackPort) ->
+    Pid = spawn(?MODULE, back_pool_process, [queue:new()]),
+    register(back_pool, Pid),
+    spawn(?MODULE, back_pool_fill_loop, [BackAddress, BackPort]).
+
+%% 不断的向 back_pool 放入 Back 相关的 Pid 直到 POOL_SIZE 个
+back_pool_fill_loop(BackAddress, BackPort) ->
+    try
+        back_pool ! {self(), len},
+        receive
+            {ok, Length} ->
+                if
+                    Length < ?POOL_SIZE ->
+                        {ok, Back} = front_connect_to_back(BackAddress, BackPort),
+                        Pid = spawn(?MODULE, back_pool_waiting, [Back, self()]),
+                        gen_tcp:controlling_process(Back, Pid),
+                        inet:setopts(Back, [{active, once}]),
+                        back_pool ! {self(), in, Pid},
+                        receive _ -> ok end;
+                    true ->
+                        timer:sleep(200)
+                end;
+            Other ->
+                throw(Other)
+        end
+    catch
+        _:Reason ->
+            io:format("connect ~p:~p failed (~p). wait 2 seconds.~n", [BackAddress, BackPort, Reason]),
+            timer:sleep(2000)
+    end,
+    back_pool_fill_loop(BackAddress, BackPort).
+
+%% 当 Back 收到 tcp_closed 则自动变成无效
+back_pool_waiting(Back, OldPid) ->
+    receive
+        {tcp_closed, _} ->
+            back_pool_waiting(empty, OldPid);
+        {Process, FrontPid, get} ->
+            if
+                Back == empty ->
+                    Process ! {FrontPid, get, {empty}};
+                true ->
+                    inet:setopts(Back, [{active, false}]),
+                    gen_tcp:controlling_process(Back, OldPid),
+                    Process ! {FrontPid, get, {ok, Back}}
+            end;
+        Other ->
+            io:format("unexpected message receive ~p.~n", [Other]),
+            gen_tcp:close(Back),
+            back_pool_waiting(empty, OldPid)
+    end.
+
+back_pool_process(Queue) ->
+    receive
+        {FrontPid, out} ->
+            case queue:out(Queue) of
+                {{value, Pid}, Queue2} ->
+                    ?LOG("out pool size: ~p.~n", [queue:len(Queue2)]),
+                    Pid ! {self(), FrontPid, get},
+                    back_pool_process(Queue2);
+                {empty, _} ->
+                    FrontPid ! {empty},
+                    back_pool_process(Queue)
+            end;
+        {FrontPid, in, Back} ->
+            Queue2 = queue:in(Back, Queue),
+            ?LOG("in pool size: ~p.~n", [queue:len(Queue2)]),
+            FrontPid ! {ok},
+            back_pool_process(Queue2);
+        {FrontPid, len} ->
+            FrontPid ! {ok, queue:len(Queue)},
+            back_pool_process(Queue);
+        {FrontPid, get, {ok, Back}} ->
+            FrontPid ! {ok, Back},
+            back_pool_process(Queue);
+        {FrontPid, get, {empty}} ->
+            self() ! {FrontPid, out},
+            back_pool_process(Queue)
+    end.
+
+front_get_back(BackAddress, BackPort) ->
+    back_pool ! {self(), out},
+    receive
+        {ok, Back} ->
+            {ok, Back};
+        {empty} ->
+            front_connect_to_back(BackAddress, BackPort)
+    end.
+
+front_connect_to_back(BackAddress, BackPort) ->
+    ?LOG("connect to back.~n", []),
+    {ok, Back} = gen_tcp:connect(BackAddress,
+                                 BackPort,
+                                 [{active, false}, binary],
+                                 ?CONNECT_TIMEOUT),
+    ok = flip_send(Back, <<?PASSWORD>>),
+    {ok, Back}.
+
 front_start([BackAddress]) ->
     front_start([BackAddress, '8781']);
 front_start([BackAddress, BackPort]) ->
@@ -143,6 +247,7 @@ front_start(Args) ->
                                               {active, false},
                                               {ifaddr, FrontAddress},
                                               binary]),
+    back_pool_new(BackAddress, BackPort),
     front_accept(Socket, BackAddress, BackPort).
 
 front_accept(Socket, BackAddress, BackPort) ->
@@ -154,11 +259,7 @@ front_process(Client, BackAddress, BackPort) ->
     try
         From = self(),
 
-        {ok, Back} = gen_tcp:connect(BackAddress,
-                                     BackPort,
-                                     [{active, false}, binary],
-                                     ?CONNECT_TIMEOUT),
-        ok = flip_send(Back, <<?PASSWORD>>),
+        {ok, Back} = front_get_back(BackAddress, BackPort),
         {ok, Endpoint} = front_socks5_handshake(Client),
         flip_send(Back, Endpoint),
 
