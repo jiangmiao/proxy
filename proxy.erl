@@ -94,6 +94,7 @@ back_start(Args) ->
     {ok, Socket} = gen_tcp:listen(BackPort, [{reuseaddr, true},
                                              {active, false},
                                              {ifaddr, BackAddress},
+                                             {nodelay, true},
                                              binary]),
     back_accept(Socket).
 
@@ -226,7 +227,7 @@ front_connect_to_back(BackAddress, BackPort) ->
     ?LOG("connect to back.~n", []),
     {ok, Back} = gen_tcp:connect(BackAddress,
                                  BackPort,
-                                 [{active, false}, binary],
+                                 [{active, false}, binary, {nodelay, true}],
                                  ?CONNECT_TIMEOUT),
     ok = flip_send(Back, <<?PASSWORD>>),
     {ok, Back}.
@@ -246,6 +247,7 @@ front_start(Args) ->
     {ok, Socket} = gen_tcp:listen(FrontPort, [{reuseaddr, true},
                                               {active, false},
                                               {ifaddr, FrontAddress},
+                                              {nodelay, true},
                                               binary]),
     back_pool_new(BackAddress, BackPort),
     front_accept(Socket, BackAddress, BackPort).
@@ -294,7 +296,7 @@ back_socks5_handshake(Client) ->
     end,
     {ok, Remote} = gen_tcp:connect(Address,
                                    Port,
-                                   [{active, false}, binary],
+                                   [{active, false}, binary, {nodelay, true}],
                                    ?CONNECT_TIMEOUT),
     {ok, Remote}.
 
