@@ -121,7 +121,7 @@ Btk.Window :default_size=>[300, 300], :window_position=>Window::POS_CENTER do|w|
 					rescue
 						puts "#{$!.message.force_encoding("utf-8")}, 等待2秒"
 						# puts $@
-						sleep 5
+						sleep 2
 					end
 				end
 			end
