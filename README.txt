@@ -101,6 +101,14 @@ Front 与 Back 的认证协议：
 
     对socks5的协议支持并不完善，比如不支持BIND，IPV6。但在大多数情况下，比如浏览器，tsocks是没有问题的。
 
+GUI Monitor：
+
+    依赖 gem btk, gtk2
+
+    功能：监测当前的浏览器通过代理的长连接，并可以进行中断连接操作。
+    运行：ruby monitor.rb [代理前端端口=8780]
+
+
 LICENCE：
 
     MIT
