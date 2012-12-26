@@ -21,6 +21,7 @@ FRONT_PORT = $ARGV[0] || 8780
 
 # \x99, \x00
 def get_infos
+	s = nil
 	s = TCPSocket.new 'localhost', FRONT_PORT
 	s.send("\x99\x00", 0)
 
@@ -57,14 +58,19 @@ def get_infos
 		info
 	}
 	infos
+ensure
+	s.close() if s
 end
 
 # \x98, \x00, PortNum:16, PortId:16 * PortNum
 def close_ports(ids)
+	s = nil
 	data = ([ids.length] + ids).pack("S>*")
 	s = TCPSocket.new 'localhost', FRONT_PORT
 	s.send("\x98\x00", 0)
 	s.send(data, data.bytesize)
+ensure
+	s.close() if s
 end
 
 
