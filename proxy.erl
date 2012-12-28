@@ -10,6 +10,7 @@
     back_process/1,
     front_process/3,
     forward/3,
+    forward/4,
 
     heart/0
 ]).
@@ -69,15 +70,20 @@ flip_send(Client, Data) ->
     gen_tcp:send(Client, flip(Data)).
 
 forward(Client, Remote, From) ->
+    forward(Client, Remote, From, fun(_Args) -> ok end).
+
+forward(Client, Remote, From, Fun) ->
     try
         {ok, Packet} = gen_tcp:recv(Client, 0),
-        ok = flip_send(Remote, Packet)
+        ok = flip_send(Remote, Packet),
+        Fun([Client, Remote, Packet]),
+        ok
     catch
         Error:Reason ->
             From ! {close},
             exit({Error, Reason})
     end,
-    forward(Client, Remote, From).
+    forward(Client, Remote, From, Fun).
 
 heart() ->
     timer:sleep(10000),
@@ -281,6 +287,10 @@ info_loop(Status) ->
                     ets:insert(Infos, {Back, Info#info{address=Value,actived_at=unix_timestamp()}})
             end,
             info_loop(Status);
+        {touch, {Back}} ->
+            [{Back, Info}] = ets:lookup(Infos, Back),
+            ets:insert(Infos, {Back, Info#info{actived_at=unix_timestamp()}}),
+            info_loop(Status);
         {delete, Back} ->
             case ets:lookup(Infos, Back) of
                 [{Back, Info}] ->
@@ -379,8 +389,12 @@ front_process(Client, BackAddress, BackPort) ->
                 try
                     flip_send(Back, Endpoint),
 
-                    spawn(?MODULE, forward, [Client, Back, From]),
-                    spawn(?MODULE, forward, [Back, Client, From]),
+                    spawn(?MODULE, forward, [Client, Back, From, fun(_Args) ->
+                              info ! {touch, {Back}}
+                              end]),
+                    spawn(?MODULE, forward, [Back, Client, From, fun(_Args) ->
+                              info ! {touch, {Back}}
+                    end]),
 
                     receive _ -> ok end
                 after
