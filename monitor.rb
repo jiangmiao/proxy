@@ -7,9 +7,11 @@ include Gtk
 INFO_ID = 0
 INFO_ADDRESS = 1
 INFO_ACTIVED_AT = 2
-INFO_FIELDS_NUM = 3
+INFO_SENT = 3
+INFO_RECV = 4
+INFO_FIELDS_NUM = 5
 
-COLS = ["序号", "地址", "活跃时间"]
+COLS = ["序号", "地址", "活跃时间", "发送", "接收"]
 COLS_NUM = COLS.size
 
 mutex = Mutex.new
@@ -18,6 +20,20 @@ $infos_hash = {}
 $sel = nil
 
 FRONT_PORT = $ARGV[0] || 8780
+
+def humanize(num)
+	num = num.to_i
+	[
+		[1e9, 'G'],
+		[1e6, 'M'],
+		[1e3, 'K'],
+		[1, 'B']
+	].each do|scale, unit|
+		if num >= scale
+			return (num/scale).round(1).to_s + unit
+		end
+	end
+end
 
 # \x99, \x00
 def get_infos
@@ -30,11 +46,13 @@ def get_infos
 	infos = []
 	i = 0
 	while true
-		info = raw_infos[i..i+3]
+		info = raw_infos[i..i+INFO_FIELDS_NUM-1]
 		i += INFO_FIELDS_NUM
 		break unless info[INFO_ID]
 		next if info[INFO_ADDRESS] == ""
 		info[INFO_ID] = info[INFO_ID].to_i
+		info[INFO_RECV] = humanize(info[INFO_RECV])
+		info[INFO_SENT] = humanize(info[INFO_SENT])
 		infos << info
 	end
 
@@ -82,11 +100,14 @@ Btk.Window :default_size=>[300, 300], :window_position=>Window::POS_CENTER do|w|
 
 	w.VBox do|vbox|
 		vbox.ScrolledWindow :policy=>[POLICY_AUTOMATIC, POLICY_AUTOMATIC] do|sw|
-			store = ListStore.new String, String, String, String
+			store = ListStore.new String, String, String, String, String
 			$store = store
-			renderer = CellRendererText.new
 			sw.TreeView store do|tv|
 				COLS.each_index do|idx|
+					renderer = CellRendererText.new
+					if idx >= INFO_ACTIVED_AT
+						renderer.xalign=1.0
+					end
 					col = TreeViewColumn.new(COLS[idx], renderer, :text => idx)
 					col.resizable=true
 					tv.append_column(col)

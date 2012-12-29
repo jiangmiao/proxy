@@ -43,7 +43,7 @@
 -define(GET_INFO, 16#99).
 -define(CLOSE_PORT, 16#98).
 
--record(info, {id, status="已连接", address="", actived_at=0, port}).
+-record(info, {id, status="已连接", address="", actived_at=0, port, front}).
 -record(status, {infos, id_port, max_id}).
 
 flip(L) ->
@@ -253,9 +253,16 @@ encode_tab_list(Pairs) ->
 
 encode_tab_list([Pair|Pairs], R) ->
     {_Back, Info} = Pair,
+    % 写入 back 字节搂，发送
+    % 写入 front 的字节数，接收
+    % 不知道为什么input始终为0
+    {output, Sent} = erlang:port_info(Info#info.port, output),
+    {output, Recv} = erlang:port_info(Info#info.front, output),
     EncodedInfo = erlang:integer_to_list(Info#info.id) ++ "," ++
         Info#info.address ++ "," ++
-        erlang:integer_to_list(Info#info.actived_at) ++ "," ,
+        erlang:integer_to_list(Info#info.actived_at) ++ "," ++
+        erlang:integer_to_list(Sent) ++ "," ++
+        erlang:integer_to_list(Recv) ++ "," ,
     encode_tab_list(Pairs, [R, EncodedInfo]);
 encode_tab_list([], R) ->
     R.
@@ -378,7 +385,7 @@ front_process(Client, BackAddress, BackPort) ->
         case front_socks5_handshake(Client) of
             {ok, proxy, Endpoint} ->
                 {ok, Back} = front_get_back(BackAddress, BackPort),
-                info ! {insert, {Back, #info{status="已连接",actived_at=unix_timestamp(), port=Back}}},
+                info ! {insert, {Back, #info{status="已连接",actived_at=unix_timestamp(), port=Back, front=Client}}},
                 case Endpoint of
                     <<?IPV4:8, Address:32, _Port/binary>> ->
                         AddressStr = inet_parse:ntoa(list_to_tuple(binary_to_list(<<Address:32>>))),
