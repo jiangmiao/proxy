@@ -16,7 +16,7 @@ var (
 	PASSWORD  = []byte("abcd1234")
 	MASK      = byte(0x66)
 	POOL_SIZE = 10
-	VERSION   = "0.1"
+	VERSION   = "0.1.1"
 	VERBOSE   = false
 )
 
