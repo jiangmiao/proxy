@@ -160,6 +160,7 @@ func (pool *Pool) Size() int {
 }
 
 func (pool *Pool) Get() (remote *Stream, e error) {
+Retry:
 	select {
 	case remote = <-pool.Remotes:
 		<-pool.RemotesPre
@@ -173,7 +174,8 @@ func (pool *Pool) Get() (remote *Stream, e error) {
 	dd("使用", pool.Size())
 	select {
 	case <-remote.Closed:
-		return nil, errors.New("连接已关闭，密码错或网络异常。")
+		dd("连接已关闭，密码错或网络异常。")
+		goto Retry
 	default:
 	}
 	return
@@ -235,6 +237,12 @@ func Frontend(listenAddr string, remoteAddr string) {
 			}
 			r(2) // PORT
 
+			var remote *Stream
+			remote, e = pool.Get()
+			if e != nil {
+				return
+			}
+
 			// Reply immediately
 			conn.Write([]byte{
 				5, 0, 0, 1, // VER REP RSV ATYP
@@ -242,14 +250,6 @@ func Frontend(listenAddr string, remoteAddr string) {
 				0, 0, // BIND.PORT
 			})
 
-			var remote *Stream
-		Retry:
-			remote, e = pool.Get()
-			if e != nil {
-				log.Println("连接后端失败", e)
-				time.Sleep(3 * time.Second)
-				goto Retry
-			}
 			remote.FlipWrite(ss.Buffer)
 			remote.Target = client
 			client.Target = remote
