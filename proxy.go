@@ -125,7 +125,7 @@ func NewPool(remoteAddr string) *Pool {
 		RemoteAddr: remoteAddr,
 		Remotes:    make(chan *Stream, POOL_SIZE),
 		RemotesPre: make(chan struct{}, POOL_SIZE),
-		status:     NORMAL,
+		status:     FAILED,
 	}
 }
 
@@ -154,9 +154,9 @@ func (pool *Pool) Fill() {
 				pool.RemotesPre <- struct{}{}
 				stream, e := pool.CreateConnection()
 				if e != nil {
-					log.Println("连接后端失败，等待3秒", e)
+					log.Println("连接后端失败，等待1秒", e)
 					pool.status = FAILED
-					time.Sleep(3 * time.Second)
+					time.Sleep(1 * time.Second)
 					<-pool.RemotesPre
 					continue
 				}
@@ -173,15 +173,16 @@ func (pool *Pool) Size() int {
 }
 
 func (pool *Pool) Get() (remote *Stream, e error) {
+	if pool.status == FAILED {
+		return nil, errors.New("连接后端失败")
+	}
 Retry:
 	select {
 	case remote = <-pool.Remotes:
 		<-pool.RemotesPre
 	default:
 		remote, e = pool.CreateConnection()
-		if e != nil {
-			return
-		}
+		return
 	}
 
 	dd("使用", pool.Size())
