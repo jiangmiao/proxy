@@ -20,6 +20,11 @@ var (
 	VERBOSE   = false
 )
 
+const (
+	NORMAL = iota
+	FAILED
+)
+
 func dd(args ...interface{}) {
 	if VERBOSE {
 		log.Println(args...)
@@ -112,6 +117,7 @@ type Pool struct {
 	RemoteAddr string
 	Remotes    chan *Stream
 	RemotesPre chan struct{}
+	status     int64
 }
 
 func NewPool(remoteAddr string) *Pool {
@@ -119,6 +125,7 @@ func NewPool(remoteAddr string) *Pool {
 		RemoteAddr: remoteAddr,
 		Remotes:    make(chan *Stream, POOL_SIZE),
 		RemotesPre: make(chan struct{}, POOL_SIZE),
+		status:     NORMAL,
 	}
 }
 
@@ -138,20 +145,26 @@ func (pool *Pool) CreateConnection() (*Stream, error) {
 
 func (pool *Pool) Fill() {
 	for i := 0; i < 10; i++ {
-		go func() {
+		go func(i int) {
 			for {
+				if pool.status == FAILED && i > 0 {
+					time.Sleep(500 * time.Millisecond)
+					continue
+				}
 				pool.RemotesPre <- struct{}{}
 				stream, e := pool.CreateConnection()
 				if e != nil {
 					log.Println("连接后端失败，等待3秒", e)
+					pool.status = FAILED
 					time.Sleep(3 * time.Second)
 					<-pool.RemotesPre
 					continue
 				}
+				pool.status = NORMAL
 				pool.Remotes <- stream
 				dd("预连接数", pool.Size())
 			}
-		}()
+		}(i)
 	}
 }
 
