@@ -353,9 +353,9 @@ front_close_back(Back) ->
     gen_tcp:close(Back).
 
 front_start([BackAddress]) ->
-    front_start([BackAddress, '8781']);
+    front_start([BackAddress, ?BACK_PORT]);
 front_start([BackAddress, BackPort]) ->
-    front_start([BackAddress, BackPort, '127.0.0.1', '8780']);
+    front_start([BackAddress, BackPort, '127.0.0.1', ?FRONT_PORT]);
 front_start(Args) ->
     [BackAddressStr, BackPortStr, FrontAddressStr, FrontPortStr] = atoms_to_lists(Args, []),
     FrontPort = list_to_integer(FrontPortStr),
@@ -478,8 +478,8 @@ front_socks5_handshake(Client) ->
     end.
 
 start() ->
-    spawn(?MODULE, back_start, [['0.0.0.0', '8781']]),
-    spawn(?MODULE, front_start, [['127.0.0.1', '8781', '127.0.0.1', '8780']]),
+    spawn(?MODULE, back_start, [['0.0.0.0', ?BACK_PORT]]),
+    spawn(?MODULE, front_start, [['127.0.0.1', ?BACK_PORT, '127.0.0.1', ?FRONT_PORT]]),
     receive
         {close} ->
             exit({done})
