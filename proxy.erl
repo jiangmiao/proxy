@@ -26,8 +26,8 @@
 -define(CONNECT_TIMEOUT, 5000).
 -define(POOL_SIZE, 10).
 
--define(PASSWORD, "abcd1234").
--define(PASSWORD_LENGTH, length(?PASSWORD)).
+-define(PASSWORD(), os:getenv("PROXY_PASSWORD", "abcd1234")).
+-define(PASSWORD_LENGTH, length(?PASSWORD())).
 
 -ifdef(debug).
 -define(LOG(Format, Values), io:format(Format, Values)).
@@ -118,9 +118,8 @@ back_accept(Socket) ->
 back_process(Front) ->
     try
         From = self(),
-
-        {ok, <<?PASSWORD>>} = flip_recv(Front, ?PASSWORD_LENGTH, ?CONNECT_TIMEOUT),
-
+        Bin = list_to_binary(?PASSWORD()),
+        {ok, Bin} = flip_recv(Front, ?PASSWORD_LENGTH, ?CONNECT_TIMEOUT),
         {ok, Remote} = back_socks5_handshake(Front),
 
         spawn(?MODULE, forward, [Front, Remote, From]),
@@ -345,7 +344,7 @@ front_connect_to_back(BackAddress, BackPort) ->
                                  BackPort,
                                  [{active, false}, binary, {nodelay, true}],
                                  ?CONNECT_TIMEOUT),
-    ok = flip_send(Back, <<?PASSWORD>>),
+    ok = flip_send(Back, list_to_binary(?PASSWORD())),
     {ok, Back}.
 
 front_close_back(Back) ->
@@ -353,9 +352,9 @@ front_close_back(Back) ->
     gen_tcp:close(Back).
 
 front_start([BackAddress]) ->
-    front_start([BackAddress, '8781']);
+    front_start([BackAddress, ?BACK_PORT]);
 front_start([BackAddress, BackPort]) ->
-    front_start([BackAddress, BackPort, '127.0.0.1', '8780']);
+    front_start([BackAddress, BackPort, '127.0.0.1', ?FRONT_PORT]);
 front_start(Args) ->
     [BackAddressStr, BackPortStr, FrontAddressStr, FrontPortStr] = atoms_to_lists(Args, []),
     FrontPort = list_to_integer(FrontPortStr),
@@ -478,8 +477,8 @@ front_socks5_handshake(Client) ->
     end.
 
 start() ->
-    spawn(?MODULE, back_start, [['0.0.0.0', '8781']]),
-    spawn(?MODULE, front_start, [['127.0.0.1', '8781', '127.0.0.1', '8780']]),
+    spawn(?MODULE, back_start, [['0.0.0.0', ?BACK_PORT]]),
+    spawn(?MODULE, front_start, [['127.0.0.1', ?BACK_PORT, '127.0.0.1', ?FRONT_PORT]]),
     receive
         {close} ->
             exit({done})
